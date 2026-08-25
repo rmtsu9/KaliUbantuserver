@@ -33,21 +33,22 @@ Ctrl + C
 บน Ubuntu Server รันคำสั่งชุดนี้:
 
 ```bash
-# สร้างโฟลเดอร์รวบรวม Dataset
+# 1. สร้างโฟลเดอร์รวบรวม Dataset
 mkdir -p ~/my_dataset
 
-# คัดลอก Log จาก Nginx, WAF และ Suricata IDS
+# 2. คัดลอก Log จาก Nginx และ Suricata IDS
 sudo cp /var/log/nginx/access.log ~/my_dataset/nginx_access.log
 sudo cp /var/log/nginx/error.log ~/my_dataset/nginx_error.log
 sudo cp /var/log/suricata/eve.json ~/my_dataset/suricata_eve.json
+sudo cp /var/log/suricata/fast.log ~/my_dataset/suricata_fast.log
 
-# ย้าย Packet capture หากมีไฟล์อยู่
+# 3. ย้าย Packet capture หากมีไฟล์อยู่
 [ -f ~/attack_traffic.pcap ] && sudo mv ~/attack_traffic.pcap ~/my_dataset/
 
-# บันทึก Log ของ Juice Shop Container
+# 4. บันทึก Log ของ Juice Shop Container
 sudo docker logs juiceshop > ~/my_dataset/juiceshop_app.log 2>&1
 
-# ให้ผู้ใช้ปัจจุบันเป็นเจ้าของไฟล์ เพื่อดาวน์โหลดผ่าน WinSCP ได้
+# 5. สิทธิ์ผู้ใช้ปัจจุบันเพื่อดาวน์โหลดผ่าน WinSCP
 sudo chown -R $USER:$USER ~/my_dataset
 ```
 
