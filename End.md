@@ -100,12 +100,20 @@ tar -czvf ~/dataset_$(date +%F_%H%M).tar.gz -C ~ my_dataset
 ใช้เฉพาะเมื่อต้องการเริ่มเก็บข้อมูลรอบใหม่ เช่น เก็บทราฟฟิกปกติเพื่อใช้เป็น Benchmark
 
 ```bash
-# ล้างเนื้อหา Log เดิม โดยคงไฟล์ไว้
+# 1. ล้าง Log ของ Nginx
 sudo truncate -s 0 /var/log/nginx/access.log
 sudo truncate -s 0 /var/log/nginx/error.log
-sudo truncate -s 0 /var/log/suricata/eve.json
 
-# ลบโฟลเดอร์รวบรวมชั่วคราว หลังยืนยันว่า export ไฟล์สำเร็จแล้ว
+# 2. ล้าง Log ของ Suricata IDS ทั้งหมด (eve, fast, stats)
+sudo truncate -s 0 /var/log/suricata/eve.json
+sudo truncate -s 0 /var/log/suricata/fast.log
+sudo truncate -s 0 /var/log/suricata/stats.log
+
+# 3. ล้าง Log ในตัว Docker Container (Juice Shop)
+sudo truncate -s 0 $(sudo docker inspect --format='{{.LogPath}}' juiceshop) 2>/dev/null || true
+
+# 4. ลบไฟล์ Packet Capture และโฟลเดอร์รวบรวมชั่วคราว
+rm -f ~/attack_traffic.pcap
 rm -rf ~/my_dataset
 ```
 
