@@ -1,12 +1,18 @@
 # ปิดรอบเก็บ Dataset และส่งออกไฟล์
 
-ใช้คู่มือนี้หลังสร้างทราฟฟิกสำหรับการทดสอบจาก Kali Linux เสร็จแล้ว เพื่อหยุดการบันทึก รวบรวม Log บีบอัด Dataset และนำไฟล์ออกไปใช้งาน
+ใช้คู่มือนี้หลังสร้างทราฟฟิกสำหรับการทดสอบจาก Kali Linux เสร็จแล้ว เพื่อหยุด Data Pipeline อย่างเป็นระเบียบ รวบรวมไฟล์ JSONL และส่งออก Dataset ไปใช้งานต่อ
 
 > ทำเฉพาะใน Lab/ระบบที่ได้รับอนุญาตเท่านั้น
 
 ## ภาพรวมผลลัพธ์
 
-เมื่อทำครบแล้ว จะได้ไฟล์ Dataset รูปแบบนี้ใน Home Directory ของ Ubuntu Server:
+Dataset หลักที่ Logstash สร้างอยู่ที่:
+
+```text
+/var/log/logstash/ai_dataset_YYYY_MM_DD.jsonl
+```
+
+เมื่อทำครบแล้ว จะได้ไฟล์ archive ใน Home Directory ของ Ubuntu Server:
 
 ```text
 ~/dataset_YYYY-MM-DD_HHMM.tar.gz
@@ -16,50 +22,76 @@
 
 ---
 
-## 1. หยุดการดักจับ Packet
+## 1. ปิดรอบ Data Pipeline อย่างเป็นระเบียบ
 
-บน Ubuntu Server ให้สลับไปยัง Terminal ที่กำลังรัน `tcpdump` อยู่ แล้วกด:
+ทำบน Ubuntu Server โดยหยุดตัวเก็บข้อมูลก่อน แล้วจึงหยุดตัวประมวลผล:
+
+```bash
+sudo systemctl stop filebeat packetbeat
+sudo systemctl stop logstash
+```
+
+ตรวจสอบว่าสถานะ service หยุดเรียบร้อย:
+
+```bash
+sudo systemctl status logstash filebeat packetbeat --no-pager
+```
+
+> การหยุด Filebeat และ Packetbeat ก่อนช่วยป้องกันไม่ให้มี event ใหม่ถูกส่งเข้ามาระหว่างที่กำลังปิด Logstash และเตรียม archive
+
+### PCAP ดิบ *(Optional)*
+
+หากเลือกเปิด `tcpdump` เพิ่มเติมระหว่างรอบนี้ ให้กลับไปยัง Terminal ที่รันอยู่ แล้วกด:
 
 ```text
 Ctrl + C
 ```
 
-คำสั่งจะหยุดทำงานและบันทึกไฟล์ `~/attack_traffic.pcap` ให้สมบูรณ์
+ขั้นตอนนี้ไม่จำเป็น หากใช้เฉพาะ Logstash + Beats pipeline
 
 ---
 
-## 2. รวบรวม Log และตั้งสิทธิ์ไฟล์
+## 2. รวบรวม Dataset หลักและ Log ประกอบ
 
-บน Ubuntu Server รันคำสั่งชุดนี้:
+รันคำสั่งชุดนี้บน Ubuntu Server:
 
 ```bash
 # สร้างโฟลเดอร์รวบรวม Dataset
 mkdir -p ~/my_dataset
 
-# คัดลอก Log จาก Nginx, WAF และ Suricata IDS
+# คัดลอกไฟล์ JSONL ที่ Logstash สร้าง
+sudo find /var/log/logstash -maxdepth 1 -type f -name 'ai_dataset_*.jsonl' \
+  -exec cp -t "$HOME/my_dataset" {} +
+
+# คัดลอก Log ต้นทางไว้ใช้ตรวจสอบ/เปรียบเทียบเพิ่มเติม
 sudo cp /var/log/nginx/access.log ~/my_dataset/nginx_access.log
 sudo cp /var/log/nginx/error.log ~/my_dataset/nginx_error.log
 sudo cp /var/log/suricata/eve.json ~/my_dataset/suricata_eve.json
-
-# ย้าย Packet capture หากมีไฟล์อยู่
-[ -f ~/attack_traffic.pcap ] && sudo mv ~/attack_traffic.pcap ~/my_dataset/
-
-# บันทึก Log ของ Juice Shop Container
 sudo docker logs juiceshop > ~/my_dataset/juiceshop_app.log 2>&1
 
+# คัดลอก PCAP เฉพาะกรณีที่เปิด tcpdump แบบ Optional
+[ -f ~/attack_traffic.pcap ] && sudo mv ~/attack_traffic.pcap ~/my_dataset/
+
 # ให้ผู้ใช้ปัจจุบันเป็นเจ้าของไฟล์ เพื่อดาวน์โหลดผ่าน WinSCP ได้
-sudo chown -R $USER:$USER ~/my_dataset
+sudo chown -R "$USER:$USER" ~/my_dataset
 ```
 
-ไฟล์หลักที่ควรอยู่ใน `~/my_dataset`:
+ไฟล์สำคัญที่ควรอยู่ใน `~/my_dataset`:
 
-| ไฟล์ | แหล่งข้อมูล |
-| --- | --- |
-| `nginx_access.log` | HTTP access log ของ Nginx |
-| `nginx_error.log` | error log ของ Nginx |
-| `suricata_eve.json` | Event log ของ Suricata IDS |
-| `attack_traffic.pcap` | Packet capture จาก tcpdump (ถ้ามี) |
-| `juiceshop_app.log` | Application log ของ Juice Shop |
+| ไฟล์ | สถานะ | แหล่งข้อมูล |
+| --- | --- | --- |
+| `ai_dataset_*.jsonl` | **หลัก** | Event ที่ Logstash เขียนจาก Filebeat และ Packetbeat |
+| `nginx_access.log` | ประกอบ | HTTP access log ของ Nginx |
+| `nginx_error.log` | ประกอบ | error log ของ Nginx |
+| `suricata_eve.json` | ประกอบ | Event log ของ Suricata IDS |
+| `juiceshop_app.log` | ประกอบ | Application log ของ Juice Shop |
+| `attack_traffic.pcap` | ทางเลือก | Packet capture จาก tcpdump หากเปิดเก็บไว้ |
+
+ตรวจสอบว่าไฟล์ Dataset หลักถูกคัดลอกแล้ว:
+
+```bash
+ls -lh ~/my_dataset/ai_dataset_*.jsonl
+```
 
 ---
 
@@ -71,10 +103,10 @@ sudo chown -R $USER:$USER ~/my_dataset
 tar -czvf ~/dataset_$(date +%F_%H%M).tar.gz -C ~ my_dataset
 ```
 
-ไฟล์ที่ได้จะอยู่ใน Home Directory และชื่อไฟล์จะระบุวันเวลาอัตโนมัติ เช่น:
+ตรวจสอบไฟล์ที่ได้:
 
-```text
-~/dataset_2026-08-26_1430.tar.gz
+```bash
+ls -lh ~/dataset_*.tar.gz
 ```
 
 ---
@@ -96,24 +128,21 @@ tar -czvf ~/dataset_$(date +%F_%H%M).tar.gz -C ~ my_dataset
 
 ## 5. เตรียม Lab สำหรับรอบถัดไป *(Optional)*
 
-ใช้เฉพาะเมื่อต้องการเริ่มเก็บข้อมูลรอบใหม่ เช่น เก็บทราฟฟิกปกติเพื่อใช้เป็น Benchmark
+หลังตรวจสอบว่า archive ถูกสร้างและดาวน์โหลดแล้ว สามารถลบเฉพาะโฟลเดอร์รวบรวมชั่วคราวได้:
 
 ```bash
-# ล้างเนื้อหา Log เดิม โดยคงไฟล์ไว้
-sudo truncate -s 0 /var/log/nginx/access.log
-sudo truncate -s 0 /var/log/nginx/error.log
-sudo truncate -s 0 /var/log/suricata/eve.json
-
-# ลบโฟลเดอร์รวบรวมชั่วคราว หลังยืนยันว่า export ไฟล์สำเร็จแล้ว
 rm -rf ~/my_dataset
 ```
 
-> ตรวจสอบว่าได้ดาวน์โหลด `dataset_*.tar.gz` ไปยัง Windows เรียบร้อยก่อนลบ `~/my_dataset`
+> อย่าลบหรือ `truncate` ไฟล์ `ai_dataset_*.jsonl` ขณะที่ Logstash ยังทำงานอยู่ เพราะอาจทำให้ Dataset ของรอบถัดไปไม่สมบูรณ์
+
+หากต้องการแยกไฟล์ Dataset ต่อรอบอย่างชัดเจน ควรใช้ Run ID/เวลาใน metadata หรือปรับ Logstash output ให้สร้างชื่อไฟล์ตามรอบการทดลองก่อนเริ่มรอบใหม่
 
 ## Checklist ก่อนจบรอบ
 
-- [ ] หยุด `tcpdump` ด้วย `Ctrl+C`
-- [ ] รวบรวม Log ลง `~/my_dataset`
-- [ ] สร้างไฟล์ `dataset_*.tar.gz`
+- [ ] หยุด Filebeat, Packetbeat และ Logstash แล้ว
+- [ ] หยุด `tcpdump` แล้ว (หากเปิดใช้งาน)
+- [ ] คัดลอก `ai_dataset_*.jsonl` ลง `~/my_dataset` แล้ว
+- [ ] สร้างไฟล์ `dataset_*.tar.gz` แล้ว
 - [ ] ดาวน์โหลดไฟล์ไปยัง Windows แล้ว
-- [ ] ล้าง Log เดิมแล้ว (หากต้องการเริ่มรอบใหม่)
+- [ ] ลบ `~/my_dataset` แล้ว (หากต้องการ)

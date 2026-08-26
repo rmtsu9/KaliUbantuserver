@@ -1,15 +1,31 @@
 # เริ่มเก็บ Dataset: Pre-collection Checklist
 
-ใช้คู่มือนี้ **ทุกครั้งหลังเปิดเครื่องใหม่** ก่อนเริ่มเก็บ Dataset เพื่อให้เครือข่าย เว็บแอป และระบบบันทึกทราฟฟิกพร้อมใช้งาน
+ใช้คู่มือนี้ **ทุกครั้งหลังเปิดเครื่องใหม่** ก่อนเริ่มเก็บ Dataset เพื่อให้เครือข่าย เว็บแอป ระบบตรวจจับ และ Data Pipeline พร้อมใช้งาน
 
 > ทำเฉพาะใน Lab/ระบบที่ได้รับอนุญาตเท่านั้น
 
-## ภาพรวม
+## ภาพรวมระบบ
 
 | เครื่อง | IP Address | Network Interface | หน้าที่ |
 | --- | --- | --- | --- |
-| Ubuntu Server | `192.168.100.10/24` | `enp0s8` | Juice Shop, Nginx (WAF), Suricata (IDS), เก็บ Packet |
+| Ubuntu Server | `192.168.100.10/24` | `enp0s8` | Juice Shop, Nginx, Suricata, Logstash, Filebeat และ Packetbeat |
 | Kali Linux | `192.168.100.20/24` | `eth1` | เครื่องทดสอบและสร้างทราฟฟิก |
+
+### Data Pipeline
+
+```text
+Nginx / Suricata / Juice Shop logs ──► Filebeat ──┐
+                                                    ├──► Logstash ──► /var/log/logstash/ai_dataset_YYYY_MM_DD.jsonl
+Network traffic on enp0s8 ──────────► Packetbeat ──┘
+```
+
+- **Filebeat** อ่านและส่งต่อ Log ที่ตั้งค่าไว้
+- **Packetbeat** ดักจับและแปลงข้อมูลทราฟฟิกเครือข่ายเป็น event
+- **Logstash** รับ/ประมวลผล event และเขียน Dataset แบบ JSON Lines (`.jsonl`)
+
+`tcpdump` ไม่ใช่ขั้นตอนบังคับอีกต่อไป เพราะ Pipeline นี้ทำงานเป็น background service อยู่แล้ว ใช้ `tcpdump` เฉพาะเมื่อต้องการ PCAP ดิบเป็นหลักฐานสำรอง
+
+---
 
 ## 1. ตั้งค่า IP Address
 
@@ -46,18 +62,21 @@ ping 192.168.100.10
 
 ---
 
-## 2. เปิดบริการที่จำเป็นบน Ubuntu Server
+## 2. เปิดบริการระบบและ Data Pipeline
 
-### เริ่ม Juice Shop Container
+ทำบน **Ubuntu Server**
+
+### เริ่ม Juice Shop, Nginx และ Suricata
 
 ```bash
 sudo docker start juiceshop
+sudo systemctl restart nginx suricata
 ```
 
-### รีสตาร์ท WAF และ IDS
+### เริ่ม Logstash, Filebeat และ Packetbeat
 
 ```bash
-sudo systemctl restart nginx suricata
+sudo systemctl restart logstash filebeat packetbeat
 ```
 
 ---
@@ -84,28 +103,65 @@ HTTP/1.1 200 OK
 
 ผลลัพธ์ที่ต้องการ: เห็นหน้าเว็บร้านค้าตามปกติ และไม่มีข้อความ `Unable to connect`
 
+### ตรวจสอบสถานะ Data Pipeline บน Ubuntu Server
+
+```bash
+sudo systemctl status logstash filebeat packetbeat --no-pager
+```
+
+ผลลัพธ์ที่ต้องการ: ทั้งสาม service อยู่ในสถานะ `active (running)`
+
 ---
 
-## 4. เริ่มดักจับทราฟฟิกเครือข่าย
+## 4. ตรวจสอบไฟล์ Dataset และเริ่มสร้าง Traffic
 
-บน Ubuntu Server เปิด Terminal แยกไว้ 1 หน้าต่าง แล้วรันคำสั่งนี้:
+Dataset หลักจะถูกเขียนอัตโนมัติโดย Logstash ที่:
+
+```text
+/var/log/logstash/ai_dataset_YYYY_MM_DD.jsonl
+```
+
+ตรวจสอบไฟล์ของวันปัจจุบันบน Ubuntu Server:
+
+```bash
+DATASET_FILE="/var/log/logstash/ai_dataset_$(date +%F | tr '-' '_').jsonl"
+sudo ls -lh "$DATASET_FILE"
+```
+
+หากไฟล์ยังไม่ปรากฏ ให้สร้างคำขอ HTTP ปกติจาก Kali Linux 1 ครั้ง แล้วตรวจสอบอีกครั้ง:
+
+```bash
+curl -I http://192.168.100.10
+```
+
+ดู event ล่าสุดแบบต่อเนื่องได้ด้วย:
+
+```bash
+sudo tail -f "$DATASET_FILE"
+```
+
+กด `Ctrl+C` เพื่อออกจากการดูไฟล์โดยไม่กระทบ service ใด ๆ
+
+### พร้อมเริ่มเก็บ Dataset
+
+เมื่อครบทุกขั้นตอน ระบบพร้อมใช้งาน:
+
+- เครือข่ายระหว่าง Kali และ Ubuntu เชื่อมต่อแล้ว
+- Juice Shop, Nginx และ Suricata ทำงานแล้ว
+- Logstash, Filebeat และ Packetbeat ทำงานแล้ว
+- เว็บเข้าได้จาก Kali Linux
+- Logstash กำลังเขียน event อัตโนมัติลงไฟล์ `.jsonl`
+
+จากนั้นจึงสลับไปทำการทดสอบที่ได้รับอนุญาตจาก Kali Linux เพื่อสร้างทราฟฟิกสำหรับ Dataset ได้ทันที
+
+---
+
+## PCAP ดิบ *(Optional)*
+
+หากต้องการเก็บ packet capture ดิบเพิ่มเติม ให้เปิด Terminal แยกบน Ubuntu Server แล้วรัน:
 
 ```bash
 sudo tcpdump -i enp0s8 -w ~/attack_traffic.pcap
 ```
 
-ปล่อย Terminal นี้ให้ทำงานค้างไว้ตลอดช่วงที่เก็บ Dataset  
-เมื่อเก็บข้อมูลเสร็จ ให้กด `Ctrl+C` เพื่อหยุดและปิดไฟล์ PCAP อย่างสมบูรณ์
-
----
-
-## พร้อมเริ่มเก็บ Dataset
-
-ตรวจครบทั้ง 4 ขั้นตอนแล้ว ระบบพร้อมใช้งาน:
-
-- เครือข่ายระหว่าง Kali และ Ubuntu เชื่อมต่อแล้ว
-- Juice Shop, Nginx และ Suricata ทำงานแล้ว
-- เว็บเข้าได้จาก Kali Linux
-- `tcpdump` กำลังบันทึกทราฟฟิกลง `~/attack_traffic.pcap`
-
-จากนั้นจึงสลับไปทำการทดสอบที่ได้รับอนุญาตจาก Kali Linux เพื่อสร้างทราฟฟิกสำหรับ Dataset ได้ทันที
+ปล่อยคำสั่งนี้ทำงานเฉพาะช่วงที่ต้องการเก็บ PCAP และกด `Ctrl+C` เมื่อเสร็จสิ้น ไฟล์นี้เป็นข้อมูลเสริม ไม่ใช่ Dataset หลักของ pipeline ใหม่

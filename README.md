@@ -33,12 +33,14 @@ Kali Linux                                      Ubuntu Server
 
                          ┌─────────────────────────────────────────┐
                          │ การเก็บข้อมูลบน Ubuntu Server           │
-                         │ • tcpdump → attack_traffic.pcap         │
+                         │ • Filebeat / Packetbeat → Logstash JSONL│
                          │ • Nginx → access.log / error.log         │
                          │ • Suricata IDS → eve.json                │
                          │ • Docker → juiceshop_app.log             │
                          └─────────────────────────────────────────┘
 ```
+
+> **Pipeline update:** Dataset หลักของ Lab นี้คือ `/var/log/logstash/ai_dataset_YYYY_MM_DD.jsonl` ซึ่ง Logstash เขียนจาก event ของ Filebeat และ Packetbeat โดยอัตโนมัติ การใช้ `tcpdump` และไฟล์ PCAP เป็นทางเลือกสำหรับเก็บหลักฐานดิบเพิ่มเติมเท่านั้น ไม่ต้องเปิด Terminal ค้างไว้เพื่อเริ่มเก็บ Dataset ตามปกติ
 
 \*Nginx ทำหน้าที่เป็น reverse proxy ตามการตั้งค่า `proxy_pass`; จะเป็น WAF ได้เมื่อมีการติดตั้งและตั้งค่ากฎ WAF เพิ่มเติม
 
@@ -69,11 +71,13 @@ Suricata ตรวจสอบแพ็กเก็ตบน interface ที่
 
 ไฟล์ `eve.json` เป็นผลลัพธ์แบบ JSON ซึ่งบันทึกเหตุการณ์ได้หลายชนิด เช่น alert, flow, HTTP, DNS และสถิติ ทั้งนี้ชนิดเหตุการณ์ที่มีจริงขึ้นกับการตั้งค่า `suricata.yaml` และ rules ที่เปิดใช้งาน
 
-### 5. tcpdump — หลักฐานระดับแพ็กเก็ต
+### 5. Logstash + Filebeat + Packetbeat — Data Pipeline หลัก
 
-`tcpdump` ดักจับข้อมูลที่ผ่าน `enp0s8` และบันทึกลงไฟล์ PCAP (`attack_traffic.pcap`) ซึ่งเก็บรายละเอียดระดับเครือข่าย เช่น IP, port, protocol, เวลา และ payload ตามที่รูปแบบทราฟฟิกอนุญาตให้บันทึกได้
+Filebeat อ่าน Log จากแหล่งที่กำหนด เช่น Nginx, Suricata และบริการอื่น ๆ แล้วส่ง event ให้ Logstash ขณะที่ Packetbeat ดักจับและถอดรหัสทราฟฟิกบน interface ที่ตั้งค่าไว้ก่อนส่ง event ให้ Logstash เช่นกัน
 
-PCAP มีประโยชน์เมื่อจำเป็นต้องตรวจสอบลำดับแพ็กเก็ตหรือวิเคราะห์ทราฟฟิกย้อนหลัง ขณะที่ Log ระดับอื่นจะช่วยอ่านบริบทของเหตุการณ์ได้รวดเร็วกว่า
+Logstash ทำหน้าที่รับ แปลง และรวม event เหล่านี้ แล้วเขียน Dataset แบบ JSON Lines ไปยัง `/var/log/logstash/ai_dataset_YYYY_MM_DD.jsonl` ดังนั้นการเก็บ Dataset ทำงานอัตโนมัติใน background เมื่อทั้งสาม service อยู่ในสถานะทำงาน
+
+`tcpdump` ยังใช้เก็บ PCAP ดิบได้เมื่อจำเป็นต้องตรวจสอบลำดับแพ็กเก็ตหรือ payload ในรายละเอียด แต่ถือเป็นหลักฐานเสริม ไม่ใช่ขั้นตอนหลักของ pipeline นี้
 
 ## เหตุผลที่ต้องเก็บ Log หลายชั้น
 
@@ -81,7 +85,8 @@ PCAP มีประโยชน์เมื่อจำเป็นต้อง
 
 | แหล่งข้อมูล | มุมมองหลัก | ตัวอย่างการใช้งาน |
 | --- | --- | --- |
-| PCAP (`tcpdump`) | แพ็กเก็ตและการเชื่อมต่อ | ตรวจสอบลำดับหรือรูปแบบทราฟฟิก |
+| Logstash JSONL | Event ที่รวมจาก Filebeat และ Packetbeat | ใช้เป็น Dataset หลักสำหรับวิเคราะห์หรือทำโมเดล |
+| PCAP (`tcpdump`) *(Optional)* | แพ็กเก็ตและการเชื่อมต่อ | ตรวจสอบลำดับหรือรูปแบบทราฟฟิกเชิงลึก |
 | Nginx access/error log | คำขอและผลตอบกลับ HTTP | ดู URL, status code, client IP และข้อผิดพลาด |
 | Suricata EVE JSON | เหตุการณ์จากการตรวจจับตาม rule | ค้นหา alert และข้อมูลประกอบการแจ้งเตือน |
 | Docker application log | พฤติกรรมของแอป | เชื่อมโยงคำขอกับผลที่แอปรายงาน |
@@ -90,7 +95,7 @@ PCAP มีประโยชน์เมื่อจำเป็นต้อง
 
 ## ลำดับการเก็บ Dataset
 
-1. ใช้ [Start.md](Start.md) เพื่อกำหนด IP เปิดบริการ ตรวจสอบ Health Check และเริ่ม `tcpdump`
+1. ใช้ [Start.md](Start.md) เพื่อกำหนด IP เปิดบริการ ตรวจสอบ Health Check และเริ่ม Logstash + Filebeat + Packetbeat
 2. สร้างทราฟฟิกที่อยู่ในขอบเขตการทดสอบและได้รับอนุญาตจาก Kali Linux
 3. ใช้ [End.md](End.md) เพื่อหยุดการดักจับ รวบรวม Log และบีบอัดไฟล์ Dataset
 4. เก็บ metadata ของรอบทดสอบเพิ่มเสมอ เช่น วันเวลา ประเภททราฟฟิก การตั้งค่า rule และเวอร์ชันเครื่องมือ
@@ -100,16 +105,18 @@ PCAP มีประโยชน์เมื่อจำเป็นต้อง
 ```text
 dataset_YYYY-MM-DD_HHMM.tar.gz
 └── my_dataset/
-    ├── attack_traffic.pcap       # Packet capture (ถ้ามี)
+    ├── ai_dataset_YYYY_MM_DD.jsonl # Dataset หลักจาก Logstash
     ├── nginx_access.log          # HTTP access log
     ├── nginx_error.log           # Nginx error log
     ├── suricata_eve.json         # IDS events / alerts
-    └── juiceshop_app.log         # Application log
+    ├── juiceshop_app.log         # Application log
+    └── attack_traffic.pcap       # Packet capture (Optional)
 ```
 
 ## ข้อควรระวังด้านคุณภาพข้อมูล
 
-- เริ่ม `tcpdump` ก่อนสร้างทราฟฟิก และหยุดด้วย `Ctrl+C` เพื่อปิดไฟล์ PCAP อย่างถูกต้อง
+- ยืนยันว่า Logstash, Filebeat และ Packetbeat ทำงานก่อนสร้างทราฟฟิก
+- ใช้ `tcpdump` เฉพาะเมื่อต้องการ PCAP ดิบ และหยุดด้วย `Ctrl+C` เพื่อปิดไฟล์อย่างถูกต้อง
 - บันทึกเวลาเริ่มและสิ้นสุดของแต่ละรอบ เพื่อเชื่อมโยงเหตุการณ์ข้าม Log ได้แม่นยำ
 - แยกรอบของทราฟฟิกปกติและทราฟฟิกทดสอบ พร้อมกำกับ label ให้ชัดเจน
 - ตรวจสอบเวลาและ timezone ของ Kali กับ Ubuntu ให้สอดคล้องกัน

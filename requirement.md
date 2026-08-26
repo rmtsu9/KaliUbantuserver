@@ -10,7 +10,7 @@
 | --- | --- | --- |
 | ระบบปฏิบัติการ | Kali Linux 64-bit พร้อม Desktop | Ubuntu Server 22.04 LTS หรือ 24.04 LTS 64-bit |
 | CPU/RAM ขั้นต่ำแนะนำ | 2 vCPU / 4 GB RAM | 2 vCPU / 4 GB RAM |
-| พื้นที่ว่างแนะนำ | 25 GB | 30 GB ขึ้นไป (PCAP และ Log ใช้พื้นที่เพิ่มตามระยะเวลาบันทึก) |
+| พื้นที่ว่างแนะนำ | 25 GB | 30 GB ขึ้นไป (JSONL, Log และ PCAP แบบ Optional ใช้พื้นที่เพิ่มตามระยะเวลาบันทึก) |
 | Network adapter | 2 ตัว: NAT + Host-only/Internal Network | 2 ตัว: NAT + Host-only/Internal Network |
 | สิทธิ์ผู้ใช้ | ผู้ใช้ที่ใช้ `sudo` ได้ | ผู้ใช้ที่ใช้ `sudo` ได้ |
 
@@ -104,7 +104,10 @@ ip addr
 | Docker Engine | รัน Juice Shop container |
 | Nginx | Reverse proxy และบันทึก HTTP log |
 | Suricata | IDS และสร้าง event log (`eve.json`) |
-| `tcpdump` | บันทึก packet capture เป็น PCAP |
+| Logstash | ประมวลผล event และเขียน Dataset แบบ `.jsonl` |
+| Filebeat | อ่าน/ส่งต่อ Log ที่กำหนดเข้าสู่ Logstash |
+| Packetbeat | สร้าง network event จาก interface ที่กำหนดและส่งเข้า Logstash |
+| `tcpdump` *(Optional)* | บันทึก packet capture เป็น PCAP ดิบเพิ่มเติม |
 | OpenSSH Server | รับการเชื่อมต่อจาก WinSCP |
 | `curl`, `jq` | Health Check และอ่าน JSON log |
 
@@ -115,6 +118,27 @@ sudo apt update
 sudo apt upgrade -y
 sudo apt install -y nginx suricata tcpdump openssh-server curl jq ca-certificates
 ```
+
+### 4.1.1 ติดตั้งและตรวจสอบ Logstash + Beats
+
+Lab นี้ต้องมี **Logstash, Filebeat และ Packetbeat** ที่ตั้งค่า pipeline ไว้แล้ว โดย Pipeline ต้องส่ง output ไปยัง:
+
+```text
+/var/log/logstash/ai_dataset_YYYY_MM_DD.jsonl
+```
+
+ต้องตั้งค่า **Elastic APT repository** ให้ตรงกับ major version ของ pipeline ก่อน หากยังไม่ได้ตั้งค่า `apt install` ด้านล่างจะไม่พบแพ็กเกจ ให้ทำตาม [Elastic installation guide](https://www.elastic.co/docs/reference/logstash/installing-logstash) ก่อน แล้วให้ทั้งสามแพ็กเกจใช้ major version เดียวกันกับ pipeline ที่กำหนดไว้:
+
+```bash
+sudo apt update
+sudo apt install -y logstash filebeat packetbeat libpcap0.8
+sudo systemctl enable logstash filebeat packetbeat
+sudo systemctl status logstash filebeat packetbeat --no-pager
+```
+
+ก่อนเริ่มเก็บข้อมูล ให้ตรวจสอบ configuration ที่มีอยู่แล้วว่าระบุ interface `enp0s8` สำหรับ Packetbeat และ output ของ Filebeat/Packetbeat ชี้ไปยัง Logstash ถูกต้อง
+
+เอกสารทางการ: [Install Logstash](https://www.elastic.co/docs/reference/logstash/installing-logstash), [Packetbeat installation and configuration](https://www.elastic.co/docs/reference/beats/packetbeat/packetbeat-installation-configuration), และ [Filebeat configuration](https://www.elastic.co/docs/reference/beats/filebeat/configuring-howto-filebeat)
 
 ### 4.2 ติดตั้ง Docker Engine จาก Docker Official Repository
 

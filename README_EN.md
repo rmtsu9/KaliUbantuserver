@@ -29,12 +29,14 @@ The lab is designed for learning, detection engineering, log analysis, and datas
                                                        │ OWASP Juice Shop (Docker, localhost:3000)│
                                                        │                                          │
                                                        │ Evidence collection:                     │
-                                                       │ • tcpdump       → PCAP                   │
+                                                       │ • Filebeat / Packetbeat → Logstash JSONL │
                                                        │ • Nginx         → access/error logs      │
                                                        │ • Suricata IDS  → EVE JSON               │
                                                        │ • Docker        → application log        │
                                                        └──────────────────────────────────────────┘
 ```
+
+> **Architecture update:** The primary Dataset is now the Logstash JSON Lines output at `/var/log/logstash/ai_dataset_YYYY_MM_DD.jsonl`. Filebeat forwards configured log sources and Packetbeat produces network events in the background. PCAP capture with `tcpdump` is optional supplementary evidence, not a required collection step.
 
 The lab network uses the following static addresses:
 
@@ -48,13 +50,14 @@ The lab network uses the following static addresses:
 When a client on Kali requests `http://192.168.100.10`, the request travels through the following path:
 
 1. Kali sends TCP/IP packets to Ubuntu through the isolated lab interface.
-2. `tcpdump` can copy those packets from `enp0s8` into a PCAP file.
+2. Packetbeat observes configured network traffic on `enp0s8` and sends structured events to Logstash.
 3. Suricata observes the traffic, decodes supported protocols, and evaluates it against its configured rules.
 4. Nginx accepts the HTTP request, writes a web-server log entry, and proxies the request to the local Juice Shop service.
-5. Juice Shop processes the request inside its Docker container and may write application output to `stdout` or `stderr`.
-6. Nginx returns the upstream response to Kali.
+5. Filebeat forwards configured log sources to Logstash, while Juice Shop may write application output to `stdout` or `stderr`.
+6. Logstash transforms and writes events to the daily `.jsonl` Dataset file.
+7. Nginx returns the upstream response to Kali.
 
-This path makes the same activity observable at several layers. An analyst can start with an IDS alert, locate the matching request in Nginx logs, inspect application behavior in container logs, and use the PCAP to verify the underlying network exchange.
+This path makes the same activity observable at several layers. An analyst can start with a Logstash JSONL event or IDS alert, locate the matching request in Nginx logs, inspect application behavior in container logs, and use optional PCAP evidence to verify the underlying network exchange.
 
 ## Core Components and Theory
 
@@ -109,9 +112,19 @@ Suricata writes structured events to `eve.json` when EVE JSON output is enabled.
 
 Reference: [Suricata Quickstart Guide](https://docs.suricata.io/en/latest/quickstart.html)
 
-### tcpdump and PCAP: packet-level ground evidence
+### Logstash, Filebeat, and Packetbeat: the primary Dataset pipeline
 
-`tcpdump` records traffic observed on a network interface. The command used in this lab writes packets captured on `enp0s8` to `attack_traffic.pcap`.
+Filebeat reads the configured log files and sends their events to Logstash. Packetbeat captures and decodes configured network traffic, then sends its events to Logstash. Logstash processes those events and writes the primary Dataset as JSON Lines:
+
+```text
+/var/log/logstash/ai_dataset_YYYY_MM_DD.jsonl
+```
+
+This pipeline runs as background services, so no terminal must remain open for standard collection. A Dataset file may not exist until the first event is received; generate a normal HTTP request after the services start, then verify the daily JSONL file.
+
+### tcpdump and PCAP: optional packet-level evidence
+
+`tcpdump` can still record traffic observed on a network interface. When deliberately enabled, it writes packets captured on `enp0s8` to `attack_traffic.pcap`.
 
 PCAP is a packet-capture format commonly used for network forensics and protocol analysis. It preserves the sequence and timing of captured frames, allowing analysts to examine IP addresses, ports, TCP sessions, DNS messages, HTTP exchanges, and other protocol fields. The available payload detail depends on the capture point and on whether traffic is encrypted.
 
@@ -123,7 +136,7 @@ Packet capture has both strengths and limitations:
 | Supports independent re-analysis with other tools | Encrypted traffic limits application-payload visibility |
 | Helps verify whether a connection or request was actually transmitted | A capture can miss traffic if started late, stopped early, or overloaded |
 
-Stopping `tcpdump` with `Ctrl+C` is important: it lets the program close the output file cleanly before the PCAP is archived.
+When optional PCAP capture is used, stopping `tcpdump` with `Ctrl+C` is important: it lets the program close the output file cleanly before the PCAP is archived.
 
 ## Why Multi-Layer Logging Matters
 
@@ -131,6 +144,7 @@ No single source fully describes a security event. Each source answers different
 
 | Evidence source | Primary perspective | Useful questions |
 | --- | --- | --- |
+| Logstash JSONL | Normalized events from Filebeat and Packetbeat | What structured events did the configured pipeline collect for this run? |
 | PCAP | Network packets and session sequence | Was traffic transmitted? Which ports, flags, payloads, and timing were observed? |
 | Nginx access log | HTTP request/response transaction | Which URI was requested? Which status code was returned? |
 | Nginx error log | Proxy and web-server failures | Did an upstream or web-server error occur? |
@@ -207,35 +221,38 @@ Follow [Start.md](Start.md) to:
 2. verify connectivity from Kali to Ubuntu;
 3. start Juice Shop, Nginx, and Suricata;
 4. verify the application locally and from Kali; and
-5. start packet capture before generating traffic.
+5. start Logstash, Filebeat, and Packetbeat before generating traffic; and
+6. start optional PCAP capture only when raw packet evidence is required.
 
 ### During collection
 
 - Keep a timestamped activity log for each traffic scenario.
 - Do not change system configuration or Suricata rules in the middle of a labelled run unless the change is recorded.
-- Watch free disk space, especially while recording PCAP files.
+- Watch free disk space, especially for JSONL output and optional PCAP files.
 - Keep test traffic inside the authorized lab scope.
 
 ### After collection
 
 Follow [End.md](End.md) to:
 
-1. stop `tcpdump` cleanly;
-2. gather Nginx, Suricata, PCAP, and Juice Shop logs;
-3. assign usable file ownership;
-4. create a timestamped `.tar.gz` archive; and
-5. export the archive to the Windows host through WinSCP.
+1. stop Filebeat, Packetbeat, and Logstash cleanly;
+2. gather the primary Logstash JSONL Dataset and supporting logs;
+3. include optional PCAP evidence when it was collected;
+4. assign usable file ownership;
+5. create a timestamped `.tar.gz` archive; and
+6. export the archive to the Windows host through WinSCP.
 
 ## Output Dataset Structure
 
 ```text
 dataset_YYYY-MM-DD_HHMM.tar.gz
 └── my_dataset/
-    ├── attack_traffic.pcap       # Raw network packet capture, when present
+    ├── ai_dataset_YYYY_MM_DD.jsonl # Primary Logstash Dataset
     ├── nginx_access.log          # HTTP request/response records
     ├── nginx_error.log           # Nginx and upstream error records
     ├── suricata_eve.json         # IDS alerts and structured network events
-    └── juiceshop_app.log         # Container/application output
+    ├── juiceshop_app.log         # Container/application output
+    └── attack_traffic.pcap       # Optional raw packet capture
 ```
 
 ## Operational Notes

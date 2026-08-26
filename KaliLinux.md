@@ -4,7 +4,8 @@
 
 This guide explains how Kali Linux can be used as a **controlled traffic-generation host** in the Kali–Ubuntu Security Monitoring Lab. Its aim is to create understandable, repeatable datasets while observing how the Ubuntu Server records the same activity through:
 
-- packet capture (`tcpdump` / PCAP);
+- Logstash JSONL events collected through Filebeat and Packetbeat; and
+- optional packet capture (`tcpdump` / PCAP).
 - Nginx access and error logs;
 - Suricata IDS events (`eve.json`); and
 - OWASP Juice Shop application logs.
@@ -20,6 +21,16 @@ Web target:    http://192.168.100.10
 > Do not substitute a public IP address, a workplace system, or any system outside your written authorization. This guide is for the local OWASP Juice Shop lab only.
 
 Use purpose-created test accounts only. Do not retrieve data beyond the intended training scenario, open database/operating-system shells, alter application data, use external callbacks, or place real credentials, cookies, tokens, or personal data in published Dataset files.
+
+## Pipeline-Specific Collection Note
+
+The primary Dataset artifact for the current lab architecture is:
+
+```text
+/var/log/logstash/ai_dataset_YYYY_MM_DD.jsonl
+```
+
+Filebeat forwards configured logs, Packetbeat produces network events, and Logstash writes the resulting JSONL file as background services. The standard collection workflow therefore starts **Logstash, Filebeat, and Packetbeat**; it does not require a foreground `tcpdump` terminal. Every PCAP reference below refers to optional supplemental evidence only.
 
 ## 2. A Necessary Correction: Tools Do Not “Cover OWASP Top 10 Completely”
 
@@ -45,7 +56,7 @@ That controlled origin makes later analysis more reliable. For example, if a low
 ```text
 Kali tool action
       │
-      ├── Network view: TCP/IP packets in PCAP
+      ├── Pipeline view: normalized Filebeat and Packetbeat events in Logstash JSONL
       ├── IDS view: protocol metadata and rule matches in Suricata EVE JSON
       ├── Web view: method, path, status, bytes, client IP in Nginx logs
       └── Application view: Juice Shop container output
@@ -102,15 +113,15 @@ Expected result: `0% packet loss` from `ping` and an HTTP success response from 
 
 | Group | Representative tools | Primary purpose | Expected evidence on Ubuntu |
 | --- | --- | --- | --- |
-| Network discovery | Nmap | Identify reachable ports and services | PCAP; possibly Suricata scan alerts |
-| Web fingerprinting | WhatWeb, Nikto | Inspect web technologies and common configuration issues | Nginx requests, PCAP, IDS alerts when rules match |
+| Network discovery | Nmap | Identify reachable ports and services | Logstash JSONL; possibly Suricata scan alerts; optional PCAP |
+| Web fingerprinting | WhatWeb, Nikto | Inspect web technologies and common configuration issues | Nginx requests, Logstash JSONL, IDS alerts when rules match |
 | Content discovery | ffuf, Gobuster, Feroxbuster | Discover reachable paths using a bounded wordlist | High volume of HTTP paths and status codes |
-| Intercepting proxies / DAST | Burp Suite, OWASP ZAP | Inspect, replay, and validate HTTP requests inside defined scope | Precise request sequences in Nginx and PCAP |
+| Intercepting proxies / DAST | Burp Suite, OWASP ZAP | Inspect, replay, and validate HTTP requests inside defined scope | Precise request sequences in Nginx and Logstash JSONL |
 | Input-validation testing | sqlmap, Burp Repeater, ZAP | Validate controlled input-handling scenarios | HTTP parameter patterns; possible IDS alerts |
 | Authentication / authorization | Burp Repeater, ZAP Fuzzer, Hydra | Test designated accounts and access-control decisions | Login events, `401`/`403`/`200` patterns, alert telemetry |
 | API investigation | curl, HTTPie, jq, Arjun* | Understand REST endpoints and JSON responses | API request/response sequences |
 | Bounded resilience tests | ApacheBench (`ab`), `wrk` | Compare normal load with a small, defined request burst | Flow volume, Nginx rates/statuses, resource telemetry |
-| Local analysis | Wireshark, TShark, jq | Inspect captured PCAP and JSON evidence | No new target traffic unless capture is started locally |
+| Local analysis | Wireshark, TShark, jq | Inspect JSONL and optional captured PCAP evidence | No new target traffic unless capture is started locally |
 
 \*Arjun is optional and may not be packaged in every Kali release.
 
@@ -133,7 +144,7 @@ nmap -sV --version-light -T2 -p 80 -oA ~/lab-results/nmap-http "$LAB_HOST"
 
 What it creates:
 
-- a TCP connection/probe pattern in `attack_traffic.pcap`;
+- normalized events in the Logstash JSONL file, plus optional PCAP evidence when enabled;
 - a service-discovery record in `~/lab-results/`; and
 - potentially a scan-related Suricata event, depending on active rules.
 
@@ -154,7 +165,7 @@ WhatWeb fingerprints visible web technologies from HTTP behavior, headers, cooki
 whatweb --log-verbose=~/lab-results/whatweb.log "$LAB_URL"
 ```
 
-Expected artifacts: Nginx access entries, PCAP HTTP traffic, and a local WhatWeb result log.
+Expected artifacts: Nginx access entries, Logstash JSONL events, and a local WhatWeb result log; optional PCAP traffic is available only when `tcpdump` was enabled.
 
 ### 6.3 Nikto — web-server checks
 
