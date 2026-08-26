@@ -36,6 +36,7 @@ Network traffic on enp0s8 ──────────► Packetbeat ──┘
 เปิด Terminal แล้วรัน:
 
 ```bash
+sudo ip addr flush dev enp0s8
 sudo ip addr add 192.168.100.10/24 dev enp0s8
 sudo ip link set enp0s8 up
 ```
@@ -45,6 +46,7 @@ sudo ip link set enp0s8 up
 เปิด Terminal แล้วรัน:
 
 ```bash
+sudo ip addr flush dev eth1
 sudo ip addr add 192.168.100.20/24 dev eth1
 sudo ip link set eth1 up
 ```
