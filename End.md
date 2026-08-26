@@ -56,23 +56,26 @@ Ctrl + C
 รันคำสั่งชุดนี้บน Ubuntu Server:
 
 ```bash
-# สร้างโฟลเดอร์รวบรวม Dataset
+# 1. สร้างโฟลเดอร์รวบรวม Dataset
 mkdir -p ~/my_dataset
 
-# คัดลอกไฟล์ JSONL ที่ Logstash สร้าง
+# 2. คัดลอกไฟล์ JSONL ที่ Logstash สร้าง
 sudo find /var/log/logstash -maxdepth 1 -type f -name 'ai_dataset_*.jsonl' \
   -exec cp -t "$HOME/my_dataset" {} +
 
-# คัดลอก Log ต้นทางไว้ใช้ตรวจสอบ/เปรียบเทียบเพิ่มเติม
+# 3. คัดลอก Log จาก Nginx และ Suricata IDS
 sudo cp /var/log/nginx/access.log ~/my_dataset/nginx_access.log
 sudo cp /var/log/nginx/error.log ~/my_dataset/nginx_error.log
 sudo cp /var/log/suricata/eve.json ~/my_dataset/suricata_eve.json
-sudo docker logs juiceshop > ~/my_dataset/juiceshop_app.log 2>&1
+sudo cp /var/log/suricata/fast.log ~/my_dataset/suricata_fast.log
 
-# คัดลอก PCAP เฉพาะกรณีที่เปิด tcpdump แบบ Optional
+# 4. ย้าย Packet capture หากมีไฟล์อยู่
 [ -f ~/attack_traffic.pcap ] && sudo mv ~/attack_traffic.pcap ~/my_dataset/
 
-# ให้ผู้ใช้ปัจจุบันเป็นเจ้าของไฟล์ เพื่อดาวน์โหลดผ่าน WinSCP ได้
+# 5. บันทึก Log ของ Juice Shop Container
+sudo docker logs juiceshop > ~/my_dataset/juiceshop_app.log 2>&1
+
+# 6. สิทธิ์ผู้ใช้ปัจจุบันเพื่อดาวน์โหลดผ่าน WinSCP
 sudo chown -R "$USER:$USER" ~/my_dataset
 ```
 
@@ -131,6 +134,20 @@ ls -lh ~/dataset_*.tar.gz
 หลังตรวจสอบว่า archive ถูกสร้างและดาวน์โหลดแล้ว สามารถลบเฉพาะโฟลเดอร์รวบรวมชั่วคราวได้:
 
 ```bash
+# 1. ล้าง Log ของ Nginx
+sudo truncate -s 0 /var/log/nginx/access.log
+sudo truncate -s 0 /var/log/nginx/error.log
+
+# 2. ล้าง Log ของ Suricata IDS ทั้งหมด (eve, fast, stats)
+sudo truncate -s 0 /var/log/suricata/eve.json
+sudo truncate -s 0 /var/log/suricata/fast.log
+sudo truncate -s 0 /var/log/suricata/stats.log
+
+# 3. ล้าง Log ในตัว Docker Container (Juice Shop)
+sudo truncate -s 0 $(sudo docker inspect --format='{{.LogPath}}' juiceshop) 2>/dev/null || true
+
+# 4. ลบไฟล์ Packet Capture และโฟลเดอร์รวบรวมชั่วคราว
+rm -f ~/attack_traffic.pcap
 rm -rf ~/my_dataset
 ```
 
